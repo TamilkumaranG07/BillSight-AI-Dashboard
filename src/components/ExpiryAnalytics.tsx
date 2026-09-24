@@ -86,48 +86,60 @@ export const ExpiryAnalytics: React.FC<ExpiryAnalyticsProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-            {expiryItems.map(item => {
-              const isDanger = item.daysRemaining <= 0;
-              const isWarning = item.daysRemaining > 0 && item.daysRemaining <= 3;
+            {expiryItems.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="py-8 text-center text-gray-400 font-medium">
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <Clock className="w-8 h-8 text-amber-300 animate-pulse" />
+                    <p className="font-bold text-gray-600 dark:text-gray-300 text-xs">No Expiry Data Found</p>
+                    <p className="text-[11px] text-gray-400">Connect your database API to populate batch expiry dates and clearance schedules.</p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              expiryItems.map(item => {
+                const isDanger = item.daysRemaining <= 0;
+                const isWarning = item.daysRemaining > 0 && item.daysRemaining <= 3;
 
-              return (
-                <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
-                  <td className="py-2.5 px-3 font-bold text-gray-400">{item.batchNumber}</td>
-                  <td className="py-2.5 px-3 font-extrabold text-gray-900 dark:text-white">{item.productName}</td>
-                  <td className="py-2.5 px-3 text-gray-500">{item.category}</td>
-                  <td className="py-2.5 px-3 text-right font-bold text-gray-800 dark:text-gray-200">{item.stockQty}</td>
-                  <td className="py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300">{item.expiryDate}</td>
-                  <td className="py-2.5 px-3">
-                    <span className={`font-extrabold ${isDanger ? 'text-rose-600' : isWarning ? 'text-amber-600' : 'text-emerald-600'}`}>
-                      {item.daysRemaining < 0 ? `Expired (${Math.abs(item.daysRemaining)}d ago)` : `${item.daysRemaining} days remaining`}
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-3 text-center">
-                    {item.discountApplied > 0 ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-white shadow-xs">
-                        {item.discountApplied}% Clearance Tag
+                return (
+                  <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
+                    <td className="py-2.5 px-3 font-bold text-gray-400">{item.batchNumber}</td>
+                    <td className="py-2.5 px-3 font-extrabold text-gray-900 dark:text-white">{item.productName}</td>
+                    <td className="py-2.5 px-3 text-gray-500">{item.category}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-gray-800 dark:text-gray-200">{item.stockQty}</td>
+                    <td className="py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300">{item.expiryDate}</td>
+                    <td className="py-2.5 px-3">
+                      <span className={`font-extrabold ${isDanger ? 'text-rose-600' : isWarning ? 'text-amber-600' : 'text-emerald-600'}`}>
+                        {item.daysRemaining < 0 ? `Expired (${Math.abs(item.daysRemaining)}d ago)` : `${item.daysRemaining} days remaining`}
                       </span>
-                    ) : (
-                      <span className="text-gray-400 font-medium">Standard Price</span>
-                    )}
-                  </td>
-                  <td className="py-2.5 px-3 text-center">
-                    {item.daysRemaining > 0 ? (
-                      <button
-                        onClick={() => onApplyClearanceDiscount(item)}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-500 text-white font-bold text-[11px] hover:bg-emerald-600 transition-all flex items-center gap-1 mx-auto shadow-xs"
-                      >
-                        <Tag className="w-3 h-3" /> Apply Markdown
-                      </button>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 border border-rose-500/20">
-                        Quarantined
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      {item.discountApplied > 0 ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-white shadow-xs">
+                          {item.discountApplied}% Clearance Tag
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 font-medium">Standard Price</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      {item.daysRemaining > 0 ? (
+                        <button
+                          onClick={() => onApplyClearanceDiscount(item)}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-500 text-white font-bold text-[11px] hover:bg-emerald-600 transition-all flex items-center gap-1 mx-auto shadow-xs"
+                        >
+                          <Tag className="w-3 h-3" /> Apply Markdown
+                        </button>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 border border-rose-500/20">
+                          Quarantined
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>

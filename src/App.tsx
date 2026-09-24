@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
-import type { FilterState, Product, ExpiryItem, ProductCategory } from './types';
+import React, { useState, useMemo, useEffect } from 'react';
+import type { FilterState, Product, ExpiryItem, ProductCategory, Transaction } from './types';
 import { computeAnalytics } from './services/analyticsEngine';
-import { INITIAL_PRODUCTS, INITIAL_RECOMMENDATIONS } from './data/mockData';
+import { INITIAL_PRODUCTS, INITIAL_RECOMMENDATIONS, INITIAL_TRANSACTIONS } from './data/mockData';
+import { dbService } from './services/apiService';
 
 // Components
 import { LoginPage } from './components/LoginPage';
@@ -34,6 +35,33 @@ export function App() {
 
   // Interactive state for SKUs and Price/Discounts
   const [productsState, setProductsState] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [transactionsState, setTransactionsState] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
+  const [isBackendConnected, setIsBackendConnected] = useState<boolean>(false);
+
+  // Fetch data from Python SQLite Web_app backend on load
+  const loadBackendData = async () => {
+    try {
+      const [dbProducts, dbTransactions] = await Promise.all([
+        dbService.fetchProducts(),
+        dbService.fetchTransactions()
+      ]);
+      if (dbProducts && dbProducts.length > 0) {
+        setProductsState(dbProducts);
+        setIsBackendConnected(true);
+      }
+      if (dbTransactions && dbTransactions.length > 0) {
+        setTransactionsState(dbTransactions);
+      }
+    } catch (err) {
+      console.warn('Could not fetch from web_app backend:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadBackendData();
+    const interval = setInterval(loadBackendData, 10000); // Periodic sync every 10s
+    return () => clearInterval(interval);
+  }, []);
 
   // Filters State
   const [filters, setFilters] = useState<FilterState>({
@@ -50,8 +78,8 @@ export function App() {
 
   // Dynamic Analytics Calculation
   const analytics = useMemo(() => {
-    return computeAnalytics(filters, INITIAL_RECOMMENDATIONS, productsState);
-  }, [filters, productsState]);
+    return computeAnalytics(filters, INITIAL_RECOMMENDATIONS, productsState, transactionsState);
+  }, [filters, productsState, transactionsState]);
 
   // Toast Trigger Helper
   const showToast = (msg: string) => {
@@ -106,6 +134,7 @@ export function App() {
           : p
       )
     );
+    dbService.createPurchaseOrder(productId, qty).then(() => loadBackendData());
     showToast(`Purchase order for ${qty} units dispatched to Wholesale Logistics!`);
   };
 
@@ -129,6 +158,7 @@ export function App() {
         return p;
       })
     );
+    dbService.updatePriceAndDiscount(productId, newPrice, discountPercent).then(() => loadBackendData());
     showToast(`Updated price (₹${newPrice.toFixed(2)}) & discount (${discountPercent}%) for SKU ${productId}!`);
   };
 

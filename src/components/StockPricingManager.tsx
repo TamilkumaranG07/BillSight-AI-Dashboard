@@ -157,58 +157,70 @@ export const StockPricingManager: React.FC<StockPricingManagerProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-amber-50 dark:divide-gray-800">
-            {filteredProducts.map(prd => {
-              const discount = (prd as any).discountPercent || 0;
-              const finalPrice = prd.price * (1 - discount / 100);
-              const isLow = prd.status === 'Low Stock';
+            {filteredProducts.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="py-8 text-center text-gray-400 font-medium">
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <Boxes className="w-8 h-8 text-amber-300 animate-pulse" />
+                    <p className="font-bold text-gray-600 dark:text-gray-300 text-xs">No Database Items Found</p>
+                    <p className="text-[11px] text-gray-400">Connect your database API (`http://localhost:5000/api/products`) to load live inventory stock.</p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              filteredProducts.map(prd => {
+                const discount = (prd as any).discountPercent || 0;
+                const finalPrice = prd.price * (1 - discount / 100);
+                const isLow = prd.status === 'Low Stock';
 
-              return (
-                <tr key={prd.id} className="hover:bg-amber-50/40 dark:hover:bg-gray-800/40 transition-colors">
-                  <td className="py-3 px-3 font-extrabold text-amber-700 dark:text-amber-400">{prd.id}</td>
-                  <td className="py-3 px-3 font-bold text-gray-900 dark:text-white">
-                    {prd.name}
-                  </td>
-                  <td className="py-3 px-3 text-gray-500">{prd.category}</td>
-                  <td className="py-3 px-3 text-right font-extrabold text-gray-900 dark:text-white">
-                    {prd.currentStock} units
-                  </td>
-                  <td className="py-3 px-3">
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                      isLow
-                        ? 'bg-amber-500/10 text-amber-700 border border-amber-500/20'
-                        : prd.status === 'Overstocked'
-                        ? 'bg-purple-500/10 text-purple-700 border border-purple-500/20'
-                        : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-                    }`}>
-                      {prd.status}
-                    </span>
-                  </td>
-                  <td className="py-3 px-3 text-right font-bold text-gray-800 dark:text-gray-200">
-                    ₹{prd.price.toFixed(2)}
-                  </td>
-                  <td className="py-3 px-3 text-center">
-                    {discount > 0 ? (
-                      <span className="px-2 py-0.5 rounded-full font-black bg-amber-500 text-white shadow-xs">
-                        -{discount}% OFF
+                return (
+                  <tr key={prd.id} className="hover:bg-amber-50/40 dark:hover:bg-gray-800/40 transition-colors">
+                    <td className="py-3 px-3 font-extrabold text-amber-700 dark:text-amber-400">{prd.id}</td>
+                    <td className="py-3 px-3 font-bold text-gray-900 dark:text-white">
+                      {prd.name}
+                    </td>
+                    <td className="py-3 px-3 text-gray-500">{prd.category}</td>
+                    <td className="py-3 px-3 text-right font-extrabold text-gray-900 dark:text-white">
+                      {prd.currentStock} units
+                    </td>
+                    <td className="py-3 px-3">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                        isLow
+                          ? 'bg-amber-500/10 text-amber-700 border border-amber-500/20'
+                          : prd.status === 'Overstocked'
+                          ? 'bg-purple-500/10 text-purple-700 border border-purple-500/20'
+                          : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                      }`}>
+                        {prd.status}
                       </span>
-                    ) : (
-                      <span className="text-gray-400 font-medium">No Discount</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-3 text-right font-black text-amber-600 dark:text-amber-400 text-sm">
-                    ₹{finalPrice.toFixed(2)}
-                  </td>
-                  <td className="py-3 px-3 text-center">
-                    <button
-                      onClick={() => handleOpenEdit(prd)}
-                      className="px-3 py-1.5 rounded-xl bg-amber-500 text-white font-extrabold text-[11px] hover:bg-amber-600 transition-all flex items-center gap-1 mx-auto shadow-xs"
-                    >
-                      <Edit3 className="w-3 h-3" /> Edit Price / Discount
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
+                    </td>
+                    <td className="py-3 px-3 text-right font-bold text-gray-800 dark:text-gray-200">
+                      ₹{prd.price.toFixed(2)}
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      {discount > 0 ? (
+                        <span className="px-2 py-0.5 rounded-full font-black bg-amber-500 text-white shadow-xs">
+                          -{discount}% OFF
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 font-medium">No Discount</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-right font-black text-amber-600 dark:text-amber-400 text-sm">
+                      ₹{finalPrice.toFixed(2)}
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      <button
+                        onClick={() => handleOpenEdit(prd)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500 text-white font-extrabold text-[11px] hover:bg-amber-600 transition-all flex items-center gap-1 mx-auto shadow-xs"
+                      >
+                        <Edit3 className="w-3 h-3" /> Edit Price / Discount
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>

@@ -43,23 +43,49 @@ export interface CalculatedAnalytics {
 }
 
 export const CATEGORY_COLORS: Record<string, string> = {
-  Beverages: '#F59E0B', // Amber
-  Snacks: '#EAB308', // Warm Yellow
-  Dairy: '#10B981', // Emerald
-  Bakery: '#D97706', // Gold/Bronze
-  'Fruits & Vegetables': '#84CC16', // Lime
-  'Personal Care': '#06B6D4', // Cyan
-  Household: '#64748B' // Slate
+  Beverages: '#F59E0B',
+  Snacks: '#EAB308',
+  Dairy: '#10B981',
+  Bakery: '#D97706',
+  'Fruits & Vegetables': '#84CC16',
+  'Personal Care': '#06B6D4',
+  Household: '#64748B'
 };
 
 export const formatINR = (val: number): string => {
   return `₹${val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+export function isDateInPreset(timestampStr: string, preset: DateRangePreset): boolean {
+  if (!timestampStr) return true;
+  const cleanStr = timestampStr.includes('T') ? timestampStr : timestampStr.replace(' ', 'T');
+  const txDate = new Date(cleanStr);
+  if (isNaN(txDate.getTime())) return true;
+
+  const txDateOnly = new Date(txDate.getFullYear(), txDate.getMonth(), txDate.getDate());
+  const todayOnly = new Date(2026, 8, 24); // Reference local date 2026-09-24
+
+  const diffDays = Math.floor((todayOnly.getTime() - txDateOnly.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (preset === 'today') {
+    return diffDays === 0;
+  } else if (preset === 'yesterday') {
+    return diffDays === 1;
+  } else if (preset === '7days') {
+    return diffDays >= 0 && diffDays <= 7;
+  } else if (preset === '30days') {
+    return diffDays >= 0 && diffDays <= 30;
+  } else if (preset === 'this_month') {
+    return txDate.getMonth() === 8 && txDate.getFullYear() === 2026;
+  }
+  return true;
+}
+
 export function computeAnalytics(
   filters: FilterState,
   recommendationState: Recommendation[] = INITIAL_RECOMMENDATIONS,
-  productState: Product[] = INITIAL_PRODUCTS
+  productState: Product[] = INITIAL_PRODUCTS,
+  transactionsState: Transaction[] = INITIAL_TRANSACTIONS
 ): CalculatedAnalytics {
   let products = [...productState];
   if (filters.category !== 'All') {
@@ -72,53 +98,29 @@ export function computeAnalytics(
     );
   }
 
-  let transactions = [...INITIAL_TRANSACTIONS];
+  // Filter transactions by Date Range, Payment Method, and Search Query
+  let transactions = [...transactionsState];
+  
+  transactions = transactions.filter(t => isDateInPreset(t.timestamp, filters.dateRange));
+
   if (filters.paymentMethod !== 'All') {
     transactions = transactions.filter(t => t.paymentMethod === filters.paymentMethod);
   }
+
   if (filters.searchQuery.trim() !== '') {
     const q = filters.searchQuery.toLowerCase();
     transactions = transactions.filter(
       t =>
         t.id.toLowerCase().includes(q) ||
         t.customerName.toLowerCase().includes(q) ||
-        t.productNames.some(pn => pn.toLowerCase().includes(q))
+        (t.productNames && t.productNames.some(pn => pn.toLowerCase().includes(q)))
     );
   }
 
-  let dateMultiplier = 1.0;
-  let periodLabel = 'vs yesterday';
-  switch (filters.dateRange) {
-    case 'today':
-      dateMultiplier = 1.0;
-      periodLabel = 'vs yesterday';
-      break;
-    case 'yesterday':
-      dateMultiplier = 0.92;
-      periodLabel = 'vs prev day';
-      break;
-    case '7days':
-      dateMultiplier = 6.4;
-      periodLabel = 'vs prev 7 days';
-      break;
-    case '30days':
-      dateMultiplier = 26.5;
-      periodLabel = 'vs prev 30 days';
-      break;
-    case 'this_month':
-      dateMultiplier = 22.1;
-      periodLabel = 'vs last month';
-      break;
-    case 'custom':
-      dateMultiplier = 3.5;
-      periodLabel = 'vs selected period';
-      break;
-  }
-
-  const baseRevenue = products.reduce((acc, p) => acc + p.revenue, 0);
-  const totalRevenue = Math.round(baseRevenue * dateMultiplier * 100) / 100;
-  const totalOrders = Math.round(482 * dateMultiplier);
-  const totalProductsSold = Math.round(3420 * dateMultiplier);
+  // Calculate real metrics from filtered backend transactions
+  const totalRevenue = Math.round(transactions.reduce((acc, t) => acc + (t.totalAmount || 0), 0) * 100) / 100;
+  const totalOrders = transactions.length;
+  const totalProductsSold = transactions.reduce((acc, t) => acc + (t.itemsCount || 1), 0);
   const avgOrderValue = totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0;
 
   const activeProductsCount = products.length;
@@ -129,53 +131,53 @@ export function computeAnalytics(
   const kpis: KpiItem[] = [
     {
       id: 'kpi-sales',
-      title: filters.dateRange === 'today' ? "Today's Sales" : 'Total Period Revenue',
+      title: 'Total Period Revenue',
       value: formatINR(totalRevenue),
       rawNumeric: totalRevenue,
       changePercent: 12.4,
       isPositive: true,
-      periodLabel,
+      periodLabel: filters.dateRange.replace('_', ' ').toUpperCase(),
       iconName: 'DollarSign',
-      sparklineData: [12000, 14500, 13200, 16800, 15900, 18200, 19500],
+      sparklineData: [4200, 5100, 6800, 7200, 8900, 9400, totalRevenue || 10500],
       alertLevel: 'normal',
-      subtitle: 'Real-time checkout total'
+      subtitle: `Revenue for ${filters.dateRange}`
     },
     {
       id: 'kpi-orders',
       title: 'Total Orders',
       value: totalOrders.toLocaleString('en-IN'),
       rawNumeric: totalOrders,
-      changePercent: 8.1,
+      changePercent: 8.2,
       isPositive: true,
-      periodLabel,
+      periodLabel: filters.dateRange.replace('_', ' ').toUpperCase(),
       iconName: 'ShoppingBag',
-      sparklineData: [42, 55, 61, 58, 72, 80, 89],
+      sparklineData: [12, 18, 24, 29, 35, 42, totalOrders || 50],
       alertLevel: 'normal',
-      subtitle: 'Completed checkout carts'
+      subtitle: `Completed checkout carts (${filters.dateRange})`
     },
     {
       id: 'kpi-units',
       title: 'Products Sold',
       value: totalProductsSold.toLocaleString('en-IN'),
       rawNumeric: totalProductsSold,
-      changePercent: 15.3,
+      changePercent: 15.1,
       isPositive: true,
-      periodLabel,
+      periodLabel: filters.dateRange.replace('_', ' ').toUpperCase(),
       iconName: 'PackageCheck',
-      sparklineData: [310, 380, 420, 490, 530, 610, 670],
+      sparklineData: [30, 45, 60, 85, 110, 135, totalProductsSold || 160],
       alertLevel: 'normal',
-      subtitle: 'Scanned barcodes count'
+      subtitle: `Scanned barcodes count (${filters.dateRange})`
     },
     {
       id: 'kpi-aov',
       title: 'Avg Order Value',
       value: `₹${avgOrderValue.toFixed(2)}`,
       rawNumeric: avgOrderValue,
-      changePercent: 4.2,
+      changePercent: 3.5,
       isPositive: true,
-      periodLabel,
+      periodLabel: filters.dateRange.replace('_', ' ').toUpperCase(),
       iconName: 'TrendingUp',
-      sparklineData: [520, 550, 580, 610, 640, 660, 685],
+      sparklineData: [150, 165, 180, 175, 190, 205, avgOrderValue || 210],
       alertLevel: 'normal',
       subtitle: 'Basket size efficiency'
     },
@@ -184,11 +186,11 @@ export function computeAnalytics(
       title: 'Active SKUs',
       value: activeProductsCount,
       rawNumeric: activeProductsCount,
-      changePercent: 2.5,
+      changePercent: 0,
       isPositive: true,
-      periodLabel: 'catalog items',
+      periodLabel: 'Database Active',
       iconName: 'Boxes',
-      sparklineData: [120, 122, 123, 125, 125, 128, 130],
+      sparklineData: [12, 12, 12, 12, 12, 12, 12],
       alertLevel: 'normal',
       subtitle: 'Available catalog'
     },
@@ -197,11 +199,11 @@ export function computeAnalytics(
       title: 'Low Stock Alerts',
       value: lowStockCount,
       rawNumeric: lowStockCount,
-      changePercent: -14.2,
+      changePercent: 0,
       isPositive: true,
-      periodLabel: 'needs reorder',
+      periodLabel: 'Database Active',
       iconName: 'AlertTriangle',
-      sparklineData: [18, 16, 15, 12, 14, 13, lowStockCount],
+      sparklineData: [1, 2, 2, 1, 3, 2, lowStockCount],
       alertLevel: lowStockCount > 0 ? 'warning' : 'normal',
       subtitle: 'Below safety threshold'
     },
@@ -210,11 +212,11 @@ export function computeAnalytics(
       title: 'Expiring Soon (<7D)',
       value: expiringSoonCount,
       rawNumeric: expiringSoonCount,
-      changePercent: -5.0,
+      changePercent: 0,
       isPositive: true,
-      periodLabel: 'quarantine risk',
+      periodLabel: 'Database Active',
       iconName: 'Clock',
-      sparklineData: [12, 10, 9, 8, 8, 7, expiringSoonCount],
+      sparklineData: [2, 2, 3, 2, 1, 2, expiringSoonCount],
       alertLevel: expiringSoonCount > 0 ? 'warning' : 'normal',
       subtitle: 'Apply clearance markdown'
     },
@@ -223,11 +225,11 @@ export function computeAnalytics(
       title: 'Expired / Billing Blocked',
       value: expiredCount,
       rawNumeric: expiredCount,
-      changePercent: -33.3,
+      changePercent: 0,
       isPositive: true,
-      periodLabel: 'zero revenue loss',
+      periodLabel: 'Database Active',
       iconName: 'ShieldAlert',
-      sparklineData: [8, 6, 5, 4, 3, 3, expiredCount],
+      sparklineData: [1, 1, 0, 1, 1, 1, expiredCount],
       alertLevel: expiredCount > 0 ? 'danger' : 'normal',
       subtitle: 'AI vision auto-blocked'
     }
@@ -246,10 +248,10 @@ export function computeAnalytics(
   ];
 
   const categoryDistribution: CategoryData[] = categoriesList.map(cat => {
-    const catProducts = INITIAL_PRODUCTS.filter(p => p.category === cat);
-    const revenue = catProducts.reduce((acc, p) => acc + p.revenue, 0) * dateMultiplier;
-    const unitsSold = Math.round(catProducts.reduce((acc, p) => acc + p.unitsSold, 0) * dateMultiplier);
-    const transactions = Math.round(catProducts.reduce((acc, p) => acc + p.transactionsCount, 0) * dateMultiplier);
+    const catProducts = products.filter(p => p.category === cat);
+    const revenue = catProducts.reduce((acc, p) => acc + (p.revenue || 0), 0);
+    const unitsSold = catProducts.reduce((acc, p) => acc + (p.unitsSold || 0), 0);
+    const transactions = catProducts.reduce((acc, p) => acc + (p.transactionsCount || 0), 0);
 
     return {
       category: cat,
@@ -260,33 +262,37 @@ export function computeAnalytics(
     };
   });
 
-  const salesTimeSeries: TimeSeriesPoint[] = [];
-  const hours = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'];
-  hours.forEach((hr, idx) => {
-    const mult = idx % 2 === 0 ? 1.2 : 0.85;
-    const rev = Math.round((totalRevenue / 8) * mult);
-    const tx = Math.round((totalOrders / 8) * mult);
-    salesTimeSeries.push({
-      label: hr,
-      timestamp: hr,
-      revenue: rev,
-      transactions: tx,
-      avgOrderValue: tx > 0 ? Math.round((rev / tx) * 10) / 10 : 0
-    });
+  // Group transactions into Sales Time Series Chart points
+  const timeMap: Record<string, { revenue: number; transactions: number }> = {};
+
+  transactions.forEach(t => {
+    if (!t.timestamp) return;
+    const dateObj = new Date(t.timestamp.replace(' ', 'T'));
+    if (isNaN(dateObj.getTime())) return;
+
+    let key = '';
+    if (filters.dateRange === 'today' || filters.dateRange === 'yesterday') {
+      const hour = dateObj.getHours();
+      key = `${hour < 10 ? '0' : ''}${hour}:00`;
+    } else {
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      key = `${monthNames[dateObj.getMonth()]} ${dateObj.getDate()}`;
+    }
+
+    if (!timeMap[key]) {
+      timeMap[key] = { revenue: 0, transactions: 0 };
+    }
+    timeMap[key].revenue += t.totalAmount || 0;
+    timeMap[key].transactions += 1;
   });
 
-  let associations = [...INITIAL_ASSOCIATIONS];
-  if (filters.category !== 'All') {
-    associations = associations.filter(rule => {
-      const prdA = INITIAL_PRODUCTS.find(p => p.name === rule.productA);
-      const prdB = INITIAL_PRODUCTS.find(p => p.name === rule.productB);
-      return prdA?.category === filters.category || prdB?.category === filters.category;
-    });
-  }
-
-  const insights = [...INITIAL_INSIGHTS];
-  const peakHeatmap = generatePeakHeatmapData();
-  const forecastData = generateForecastData();
+  const salesTimeSeries: TimeSeriesPoint[] = Object.keys(timeMap).map(key => ({
+    label: key,
+    timestamp: key,
+    revenue: Math.round(timeMap[key].revenue * 100) / 100,
+    transactions: timeMap[key].transactions,
+    avgOrderValue: Math.round((timeMap[key].revenue / (timeMap[key].transactions || 1)) * 100) / 100
+  }));
 
   return {
     kpis,
@@ -294,10 +300,10 @@ export function computeAnalytics(
     topProducts,
     categoryDistribution,
     salesTimeSeries,
-    insights,
-    associations: associations.length > 0 ? associations : INITIAL_ASSOCIATIONS,
-    peakHeatmap,
-    forecastData,
+    insights: INITIAL_INSIGHTS,
+    associations: INITIAL_ASSOCIATIONS,
+    peakHeatmap: generatePeakHeatmapData(),
+    forecastData: generateForecastData(),
     expiryItems: INITIAL_EXPIRY_ITEMS,
     recommendations: recommendationState,
     transactions,
@@ -309,3 +315,4 @@ export function computeAnalytics(
     }
   };
 }
+
