@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { FilterState, Product, ExpiryItem, ProductCategory, Transaction } from './types';
 import { computeAnalytics } from './services/analyticsEngine';
 import { INITIAL_PRODUCTS, INITIAL_RECOMMENDATIONS, INITIAL_TRANSACTIONS } from './data/mockData';
-import { dbService } from './services/apiService';
+import { dbService, API_BASE_URL } from './services/apiService';
+import { useInventorySocket } from './hooks/useInventorySocket';
 
 // Components
 import { LoginPage } from './components/LoginPage';
@@ -19,7 +20,15 @@ import { StockPricingManager } from './components/StockPricingManager';
 import { ReorderModal } from './components/ReorderModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 
-import { CheckCircle2, ShieldCheck } from 'lucide-react';
+// New Inventory Management Components
+import { ProductTable } from './components/inventory/ProductTable';
+import { AddProductModal } from './components/inventory/AddProductModal';
+import { StockManagementModal } from './components/inventory/StockManagementModal';
+import { ExpiryManagementView } from './components/inventory/ExpiryManagementView';
+import { InventoryTransactionsLog } from './components/inventory/InventoryTransactionsLog';
+import { BarcodeScannerModal } from './components/inventory/BarcodeScannerModal';
+
+import { CheckCircle2, ShieldCheck, Barcode, PackageCheck, History, Plus } from 'lucide-react';
 
 export function App() {
   // Authentication State
@@ -27,18 +36,43 @@ export function App() {
   const [adminName, setAdminName] = useState<string>('Tamilkumaran G');
   const [adminRole, setAdminRole] = useState<string>('Store Administrator');
 
-  // Theme state: Clean Yellow & White theme by default
+  // Theme state
   const [darkMode, setDarkMode] = useState<boolean>(false);
   
   // Navigation state
   const [activeSection, setActiveSection] = useState<string>('overview');
 
-  // Interactive state for SKUs and Price/Discounts
+  // Interactive state
   const [productsState, setProductsState] = useState<Product[]>(INITIAL_PRODUCTS);
   const [transactionsState, setTransactionsState] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
   const [isBackendConnected, setIsBackendConnected] = useState<boolean>(false);
 
-  // Fetch data from Python SQLite Web_app backend on load
+  // Modals state
+  const [isAddProductOpen, setIsAddProductOpen] = useState<boolean>(false);
+  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [stockManageProduct, setStockManageProduct] = useState<Product | null>(null);
+  const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState<boolean>(false);
+
+  // Toast State
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [reorderProduct, setReorderProduct] = useState<Product | null>(null);
+  const [isNotificationOpen, setIsNotificationOpen] = useState<boolean>(false);
+
+  // Toast Trigger Helper
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Real-time WebSocket connection
+  const { status: socketStatus } = useInventorySocket((msg) => {
+    if (msg.type === 'inventory_updated' || msg.type === 'sale_completed' || msg.type === 'product_created') {
+      showToast(`Real-time update: ${msg.type.replace('_', ' ')} received!`);
+      loadBackendData();
+    }
+  });
+
+  // Fetch data from FastAPI / SQLite Web_app backend on load
   const loadBackendData = async () => {
     try {
       const [dbProducts, dbTransactions] = await Promise.all([
@@ -53,13 +87,13 @@ export function App() {
         setTransactionsState(dbTransactions);
       }
     } catch (err) {
-      console.warn('Could not fetch from web_app backend:', err);
+      console.warn('Could not fetch from inventory backend:', err);
     }
   };
 
   useEffect(() => {
     loadBackendData();
-    const interval = setInterval(loadBackendData, 10000); // Periodic sync every 10s
+    const interval = setInterval(loadBackendData, 15000); // 15s fallback polling
     return () => clearInterval(interval);
   }, []);
 
@@ -71,23 +105,12 @@ export function App() {
     searchQuery: ''
   });
 
-  // Toast / Modals state
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [reorderProduct, setReorderProduct] = useState<Product | null>(null);
-  const [isNotificationOpen, setIsNotificationOpen] = useState<boolean>(false);
-
   // Dynamic Analytics Calculation
   const analytics = useMemo(() => {
     return computeAnalytics(filters, INITIAL_RECOMMENDATIONS, productsState, transactionsState);
   }, [filters, productsState, transactionsState]);
 
-  // Toast Trigger Helper
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
-  };
-
-  // Login Success Handler
+  // Handlers
   const handleLoginSuccess = (name: string, role: string) => {
     setAdminName(name || 'Tamilkumaran G');
     setAdminRole(role || 'Store Administrator');
@@ -118,31 +141,60 @@ export function App() {
     showToast('Global filters reset to default');
   };
 
-  const handleTriggerReorder = (product: Product) => {
-    setReorderProduct(product);
+  const handleSaveProduct = async (productData: any) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/products`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(productData)
+      });
+      if (res.ok) {
+        showToast(`Product '${productData.name}' saved successfully!`);
+        loadBackendData();
+      } else {
+        const err = await res.json();
+        showToast(`Error saving product: ${err.detail || 'Validation error'}`);
+      }
+    } catch (e) {
+      showToast('Could not save product to backend');
+    }
   };
 
-  const handleConfirmReorder = (productId: string, qty: number) => {
-    setProductsState(prev =>
-      prev.map(p =>
-        p.id === productId
-          ? {
-              ...p,
-              currentStock: p.currentStock + qty,
-              status: p.currentStock + qty > p.minStockThreshold ? 'In Stock' : p.status
-            }
-          : p
-      )
-    );
-    dbService.createPurchaseOrder(productId, qty).then(() => loadBackendData());
-    showToast(`Purchase order for ${qty} units dispatched to Wholesale Logistics!`);
+  const handleConfirmStockAction = async (productId: string, actionData: any) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/inventory/${productId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(actionData)
+      });
+      if (res.ok) {
+        showToast(`Stock updated for Product SKU ${productId}`);
+        loadBackendData();
+      } else {
+        const err = await res.json();
+        showToast(`Stock action error: ${err.detail || 'Failed'}`);
+      }
+    } catch (e) {
+      showToast('Could not reach backend server');
+    }
+  };
+
+  const handleDeleteProduct = async (p: Product) => {
+    if (window.confirm(`Are you sure you want to deactivate/delete product ${p.name}?`)) {
+      try {
+        await fetch(`${API_BASE_URL}/products/${p.id}`, { method: 'DELETE' });
+        showToast(`Product ${p.name} removed/deactivated.`);
+        loadBackendData();
+      } catch (e) {
+        showToast('Error deleting product');
+      }
+    }
   };
 
   const handleApplyClearanceDiscount = (item: ExpiryItem) => {
     showToast(`Applied 30% yellow-tag clearance markdown to ${item.productName}!`);
   };
 
-  // Price & Discount Update Handler
   const handleUpdatePriceDiscount = (productId: string, newPrice: number, discountPercent: number) => {
     setProductsState(prev =>
       prev.map(p => {
@@ -162,22 +214,6 @@ export function App() {
     showToast(`Updated price (₹${newPrice.toFixed(2)}) & discount (${discountPercent}%) for SKU ${productId}!`);
   };
 
-  // Batch Category Discount Handler
-  const handleBatchDiscount = (category: ProductCategory, discountPercent: number) => {
-    setProductsState(prev =>
-      prev.map(p => {
-        if (p.category === category) {
-          return {
-            ...p,
-            discountPercent
-          } as Product;
-        }
-        return p;
-      })
-    );
-    showToast(`Applied flat ${discountPercent}% festival discount to all ${category} items!`);
-  };
-
   const scrollToSection = (sectionId: string) => {
     setActiveSection(sectionId);
     const el = document.getElementById(sectionId);
@@ -186,7 +222,6 @@ export function App() {
     }
   };
 
-  // Render Login Page if not authenticated
   if (!isAuthenticated) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
@@ -209,7 +244,39 @@ export function App() {
       />
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
+        
+        {/* Module Header Bar */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-amber-600/10 border border-amber-500/20">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-black shadow-md">
+              <PackageCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold text-gray-900 dark:text-white">
+                Inventory Management & FEFO Billing Control
+              </h1>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Real-time stock deduction • Barcode lookup • FEFO batch allocation • Expiry alerts
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsBarcodeScannerOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-amber-500 text-white font-bold text-xs shadow-md hover:bg-amber-600 transition-all flex items-center gap-1.5"
+            >
+              <Barcode className="w-4 h-4" /> Barcode Scanner
+            </button>
+            <button
+              onClick={() => { setProductToEdit(null); setIsAddProductOpen(true); }}
+              className="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs shadow-md hover:opacity-90 transition-all flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" /> Add Product
+            </button>
+          </div>
+        </div>
         
         {/* Global Filter Bar */}
         <FilterBar
@@ -222,19 +289,30 @@ export function App() {
         <section id="overview" className="scroll-mt-24">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-xl font-extrabold text-gray-900 dark:text-white">
-                BillSightAI Real-Time Overview & Metrics
-              </h1>
+              <h2 className="text-xl font-extrabold text-gray-900 dark:text-white">
+                Real-Time Overview & Inventory Metrics
+              </h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Displaying live statistics filtered by {filters.dateRange.replace('_', ' ')} • {filters.category} Category
+                Live statistics • Socket connection: <span className="font-bold uppercase text-emerald-600">{socketStatus}</span>
               </p>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-amber-800 dark:text-amber-300 font-bold bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/20">
-              <ShieldCheck className="w-4 h-4 text-amber-500" /> Authenticated Session: {adminName}
+              <ShieldCheck className="w-4 h-4 text-amber-500" /> Authenticated: {adminName}
             </div>
           </div>
           
           <KpiCards kpis={analytics.kpis} />
+        </section>
+
+        {/* Section: Inventory Products Table */}
+        <section id="stock-pricing" className="scroll-mt-24">
+          <ProductTable
+            products={productsState}
+            onAddProduct={() => { setProductToEdit(null); setIsAddProductOpen(true); }}
+            onEditProduct={(p) => { setProductToEdit(p); setIsAddProductOpen(true); }}
+            onDeleteProduct={handleDeleteProduct}
+            onManageStock={(p) => setStockManageProduct(p)}
+          />
         </section>
 
         {/* Section 2: Sales Analytics Chart */}
@@ -252,7 +330,7 @@ export function App() {
           <section id="top-products" className="lg:col-span-7 scroll-mt-24">
             <MostDemandedProducts
               products={analytics.topProducts}
-              onSelectProduct={handleTriggerReorder}
+              onSelectProduct={(p) => setStockManageProduct(p)}
             />
           </section>
 
@@ -264,35 +342,17 @@ export function App() {
           </section>
         </div>
 
-        {/* Section 5: Stock & Pricing Manager Tab */}
-        <section id="stock-pricing" className="scroll-mt-24">
-          <StockPricingManager
-            products={productsState}
-            onUpdatePriceDiscount={handleUpdatePriceDiscount}
-            onBatchDiscount={handleBatchDiscount}
+        {/* Section: Expiry Guard Analytics & Batch Management */}
+        <section id="expiry" className="scroll-mt-24">
+          <ExpiryManagementView
+            expiryItems={analytics.expiryItems}
+            onApplyClearance={handleApplyClearanceDiscount}
           />
         </section>
 
-        {/* Section 6 & 7: Peak Heatmap & Demand Sales Forecast */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <section id="peak-sales" className="lg:col-span-6 scroll-mt-24">
-            <PeakSalesHeatmap heatmapData={analytics.peakHeatmap} />
-          </section>
-
-          <section id="sales-forecast" className="lg:col-span-6 scroll-mt-24">
-            <SalesForecast
-              forecastPoints={analytics.forecastData}
-              darkMode={darkMode}
-            />
-          </section>
-        </div>
-
-        {/* Section 8: Expiry Guard Analytics */}
-        <section id="expiry" className="scroll-mt-24">
-          <ExpiryAnalytics
-            expiryItems={analytics.expiryItems}
-            onApplyClearanceDiscount={handleApplyClearanceDiscount}
-          />
+        {/* Section: Inventory Audit Transaction Logs */}
+        <section id="audit-log" className="scroll-mt-24">
+          <InventoryTransactionsLog />
         </section>
 
       </main>
@@ -303,7 +363,7 @@ export function App() {
           BillSightAI - Smart Supermarket Billing & Inventory System
         </p>
         <p className="text-[11px] mt-1 text-gray-400">
-          Logged in Administrator: {adminName} ({adminRole}) • Clean Yellow & White SaaS Interface
+          Logged in Administrator: {adminName} ({adminRole}) • Real-time FEFO Stock Management Enabled
         </p>
       </footer>
 
@@ -316,10 +376,38 @@ export function App() {
       )}
 
       {/* Modals */}
+      <AddProductModal
+        isOpen={isAddProductOpen}
+        productToEdit={productToEdit}
+        onClose={() => setIsAddProductOpen(false)}
+        onSave={handleSaveProduct}
+      />
+
+      <StockManagementModal
+        product={stockManageProduct}
+        onClose={() => setStockManageProduct(null)}
+        onConfirmAction={handleConfirmStockAction}
+      />
+
+      <BarcodeScannerModal
+        isOpen={isBarcodeScannerOpen}
+        onClose={() => setIsBarcodeScannerOpen(false)}
+        onAddNewProduct={(barcode) => {
+          setProductToEdit(null);
+          setIsAddProductOpen(true);
+        }}
+      />
+
       <ReorderModal
         product={reorderProduct}
         onClose={() => setReorderProduct(null)}
-        onConfirmReorder={handleConfirmReorder}
+        onConfirmReorder={(productId, qty) => {
+          handleConfirmStockAction(productId, {
+            transaction_type: 'STOCK_IN',
+            quantity: qty,
+            reason: 'Purchase reorder'
+          });
+        }}
       />
 
       <NotificationDrawer
